@@ -8,8 +8,7 @@
 
 AMainCharacter::AMainCharacter()
 {
-    // 本角色不需要每帧 Tick，关闭以提升性能
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = true;
 
     // ----------------------------- 创建弹簧臂 -----------------------------
     SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
@@ -17,11 +16,11 @@ AMainCharacter::AMainCharacter()
 
     // 上帝视角通常不希望弹簧臂跟随控制器旋转，我们手动设置固定角度
     SpringArm->bUsePawnControlRotation = false;
-    SpringArm->TargetArmLength = 800.0f;                 // 相机距离角色的距离
-    SpringArm->SetRelativeRotation(FRotator(-60.0f, 0.0f, 0.0f)); // 俯视角度（可调整）
-    SpringArm->bInheritPitch = false;                    // 不继承控制器的俯仰
-    SpringArm->bInheritRoll = false;                     // 不继承控制器的横滚
-    SpringArm->bInheritYaw = false;                      // 不继承控制器的偏航（相机固定在世界空间）
+    SpringArm->TargetArmLength = 5000.0f; // 相机距离角色的距离
+    SpringArm->SetRelativeRotation(FRotator(-90.0f, 0.0f, 0.0f)); // 俯视角度（可调整）
+    SpringArm->bInheritPitch = false; // 不继承控制器的俯仰
+    SpringArm->bInheritRoll = false; // 不继承控制器的横滚
+    SpringArm->bInheritYaw = false; // 不继承控制器的偏航（相机固定在世界空间）
 
     // ----------------------------- 创建摄像机 -----------------------------
     Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
@@ -29,38 +28,61 @@ AMainCharacter::AMainCharacter()
 
     // ----------------------------- 角色移动设置 -----------------------------
     UCharacterMovementComponent* MoveComp = GetCharacterMovement();
-    MoveComp->MaxWalkSpeed = 600.0f;          // 移动速度
-    MoveComp->JumpZVelocity = 0.0f;            // 禁止跳跃（上帝视角通常不需要）
-    MoveComp->AirControl = 0.0f;                // 空中无法控制（防止跳跃后漂移）
-    MoveComp->bOrientRotationToMovement = true; // 角色朝向移动方向（可选，使转身更自然）
+    MoveComp->SetMovementMode(MOVE_Flying); // 启用飞行模式
+    MoveComp->MaxWalkSpeed = 1000.0f;
+    MoveComp->MaxFlySpeed = 1000.0f; // 设置飞行速度
+    MoveComp->BrakingDecelerationFlying = 5000.0f; // 设置飞行刹车减速度
+    MoveComp->JumpZVelocity = 0.0f; // 可保留为0
+    MoveComp->AirControl = 1.0f; // 飞行时建议开启空气控制
+    MoveComp->bOrientRotationToMovement = true;
+
+    // 默认边界
+    MinBounds = FVector(-50000.0f, -50000.0f, 0.0f);
+    MaxBounds = FVector(50000.0f, 50000.0f, 50000.0f);
 }
 
 void AMainCharacter::Move(const FInputActionValue& Value)
 {
-    // 获取输入二维向量（X = 左右，Y = 前后）
     FVector2D MovementVector = Value.Get<FVector2D>();
+    if (Controller)
+    {
+        // 获取控制器旋转
+        FRotator ControlRotation = Controller->GetControlRotation();
+        // 只保留偏航角，构建一个仅水平旋转的旋转量
+        FRotator YawRotation(0, ControlRotation.Yaw, 0);
 
-    // 确保角色已被控制
-    if (Controller == nullptr)
-        return;
+        // 计算水平前方向（X轴）和水平右方向（Y轴）
+        FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+        FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-    // 获取相机的朝向向量（忽略垂直分量，确保只在水平面移动）
-    FVector CameraForward = Camera->GetForwardVector();
-    FVector CameraRight = Camera->GetRightVector();
-
-    // 将 Z 分量置零，实现水平面移动
-    CameraForward.Z = 0.0f;
-    CameraRight.Z = 0.0f;
-
-    // 重新归一化，确保方向向量长度为 1
-    CameraForward.Normalize();
-    CameraRight.Normalize();
-
-    // 根据输入值向相机的前方和右方施加移动
-    // 注意：MovementVector.Y 对应 W/S（前后），MovementVector.X 对应 A/D（左右）
-    AddMovementInput(CameraForward, MovementVector.Y);
-    AddMovementInput(CameraRight, MovementVector.X);
+        // 应用移动
+        AddMovementInput(ForwardDirection, MovementVector.Y);
+        AddMovementInput(RightDirection, MovementVector.X);
+    }
 }
+
+void AMainCharacter::MoveUpDown(const FInputActionValue& Value)
+{
+    float UpDownValue = Value.Get<float>();
+    if (Controller != nullptr)
+    {
+        AddMovementInput(FVector::UpVector, UpDownValue);
+    }
+}
+
+
+void AMainCharacter::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    ClampPositionToBounds();
+}
+
+void AMainCharacter::BeginPlay()
+{
+    Super::BeginPlay();
+    ClampPositionToBounds();
+}
+
 
 void AMainCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -89,5 +111,24 @@ void AMainCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompo
         {
             EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AMainCharacter::Move);
         }
+        // 垂直移动绑定
+        if (UpDownAction)
+        {
+            EnhancedInput->BindAction(UpDownAction, ETriggerEvent::Triggered, this, &AMainCharacter::MoveUpDown);
+        }
+    }
+}
+
+void AMainCharacter::ClampPositionToBounds()
+{
+    FVector CurrentLocation = GetActorLocation();
+    FVector ClampedLocation;
+    ClampedLocation.X = FMath::Clamp(CurrentLocation.X, MinBounds.X, MaxBounds.X);
+    ClampedLocation.Y = FMath::Clamp(CurrentLocation.Y, MinBounds.Y, MaxBounds.Y);
+    ClampedLocation.Z = FMath::Clamp(CurrentLocation.Z, MinBounds.Z, MaxBounds.Z);
+
+    if (!ClampedLocation.Equals(CurrentLocation))
+    {
+        SetActorLocation(ClampedLocation);
     }
 }

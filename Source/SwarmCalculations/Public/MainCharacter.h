@@ -38,9 +38,28 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
     UInputMappingContext* DefaultMappingContext;
 
+    // 用于上升/下降的一维输入动作
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UInputAction* UpDownAction;
+
+    // 移动范围边界（在蓝图中可编辑）
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Bounds")
+    FVector MinBounds;   // 最小边界 (X, Y, Z)
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement Bounds")
+    FVector MaxBounds;   // 最大边界 (X, Y, Z)
+
     // 移动函数，由增强输入系统调用
     void Move(const FInputActionValue& Value);
+    void MoveUpDown(const FInputActionValue& Value);
+
+    virtual void Tick(float DeltaTime) override;
+    virtual void BeginPlay() override;
 
     // 重写 SetupPlayerInputComponent 以绑定输入
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+
+private:
+    // 检查并限制位置
+    void ClampPositionToBounds();
 };
